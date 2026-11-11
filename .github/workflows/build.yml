@@ -19,25 +19,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install static build toolchains
+      - name: Build static binaries in Debian container
         run: |
           set -euo pipefail
-          APT_OPTS="-o Acquire::ForceIPv4=true -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=2"
-          PKGS="build-essential musl-tools gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross file"
-
-          # GitHub runner images contain several third-party apt sources.
-          # Refresh only the Ubuntu main source first; the fallback below
-          # refreshes everything with a hard timeout if a package is missing.
-          sudo DEBIAN_FRONTEND=noninteractive timeout 240 apt-get $APT_OPTS -o Dir::Etc::sourceparts=- update || true
-
-          if ! sudo DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y --no-install-recommends $PKGS; then
-            echo "install with the Ubuntu-only lists failed; refreshing all sources with a timeout" >&2
-            sudo DEBIAN_FRONTEND=noninteractive timeout 240 apt-get $APT_OPTS update || true
-            sudo DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y --no-install-recommends $PKGS
-          fi
-
-      - name: Build static binaries
-        run: sh scripts/build-static.sh all
+          timeout 600 docker run --rm \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -w /src \
+            -e DEBIAN_FRONTEND=noninteractive \
+            debian:bookworm-slim \
+            bash -c '
+              set -e
+              apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+              apt-get install -y --no-install-recommends \
+                build-essential ca-certificates file musl-tools \
+                gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf \
+                libc6-dev-arm64-cross libc6-dev-armhf-cross
+              sh scripts/build-static.sh all
+            '
 
       - name: Test native x86_64 binary
         run: sh tests/test_mtool.sh dist/mtool.x86_64
