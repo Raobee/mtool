@@ -9,9 +9,23 @@ variables:
   GIT_DEPTH: "1"
   DEBIAN_FRONTEND: "noninteractive"
   MTOOL_TEST_PCI: "0"
+  # Debian package mirror.  The build machine is in China and has no global
+  # proxy, so switch apt to a domestic mirror before installing anything.
+  # Override with e.g. APT_MIRROR=mirrors.aliyun.com if needed.
+  APT_MIRROR: "mirrors.tuna.tsinghua.edu.cn"
 
 before_script:
-  - apt-get update -qq
+  - |
+    mirror=${APT_MIRROR#http://}
+    mirror=${mirror#https://}
+    mirror=${mirror%/}
+    if [ -n "$mirror" ]; then
+      for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
+        [ -f "$f" ] || continue
+        sed -i "s|deb.debian.org|$mirror|g; s|security.debian.org|$mirror|g" "$f"
+      done
+    fi
+  - apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update -qq
   - apt-get install -y -qq --no-install-recommends build-essential ca-certificates file musl-tools gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross
 
 build:

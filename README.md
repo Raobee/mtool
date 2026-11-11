@@ -364,6 +364,9 @@ sh scripts/build-static.sh all
 仓库自带 `.gitlab-ci.yml`：
 
 - `image: debian:bookworm-slim`，只装编译工具，不装模拟器/虚拟机；
+- 安装前先把 Debian apt 源切到国内镜像（默认
+  `mirrors.tuna.tsinghua.edu.cn`，可用 CI 变量 `APT_MIRROR` 覆盖），
+  避免 Docker 内直接走国外 apt 源；
 - 安装 `musl-tools`、`gcc-aarch64-linux-gnu`、`gcc-arm-linux-gnueabihf`、
   对应的 `libc6-dev-*-cross`；
 - `parallel:matrix` 三个 `ARCH`：`x86_64`、`aarch64`、`armv7`；
