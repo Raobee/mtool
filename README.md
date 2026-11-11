@@ -20,6 +20,8 @@ mtool/
 │   └── build-static.sh      # x86_64 + aarch64 + armv7 静态构建
 ├── tests/
 │   └── test_mtool.sh        # 文件后端测试，不需要 root / 不需要硬件
+├── .github/workflows/
+│   └── build.yml            # GitHub Actions：三架构编译 + tag 发布
 ├── .gitlab-ci.yml           # GitLab CI：三架构静态编译
 ├── .gitignore
 ├── LICENSE                  # MIT
@@ -324,7 +326,7 @@ BAR 写入任何数据。
 
 ---
 
-## 8. 静态链接与 GitLab CI
+## 8. 静态链接与 CI
 
 ### 8.1 为什么是静态
 
@@ -368,7 +370,9 @@ sh scripts/build-static.sh all
 
 脚本会检查每个产物是否真的没有 `NEEDED`，并生成 `.sha256`。
 
-### 8.3 GitLab CI
+### 8.3 CI（GitLab / GitHub）
+
+#### GitLab CI
 
 仓库自带 `.gitlab-ci.yml`：
 
@@ -386,8 +390,26 @@ sh scripts/build-static.sh all
   打成 `mtool-<tag>-linux-static.tar.gz`，用 `CI_JOB_TOKEN` 创建
   GitLab Release，并把 tar 包作为 release asset 链接。
 
-CI 只负责编译和静态链接校验，不执行 ARM 二进制；ARM 版本的运行验证
-需要在真实 ARM 机器上进行（或开发阶段在本地临时使用用户态模拟器）。
+#### GitHub Actions
+
+仓库自带 `.github/workflows/build.yml`：
+
+- `runs-on: ubuntu-22.04`，只 `apt-get install` 编译工具
+  （`musl-tools`、`gcc-aarch64-linux-gnu`、`gcc-arm-linux-gnueabihf`、
+  `libc6-dev-*-cross`），不装 qemu/虚拟机；
+- push `main`、PR 或手动触发：编译三个架构，x86_64 跑文件测试，
+  aarch64/armv7 做 `file` + `readelf -h` 校验，上传 `mtool-static`
+  artifact；
+- push `v*` tag：额外运行 `release` job，打包 tar 包并连同三个
+  二进制、`.sha256` 一起创建/更新 GitHub Release；
+- 使用仓库自带的 `GITHUB_TOKEN`，不需要个人 access token；
+  如果仓库的 **Settings → Actions → General → Workflow permissions**
+  是 read-only，需要改为 **Read and write**，否则 release job
+  无法创建 Release。
+
+两套 CI 都只负责编译和静态链接校验，不执行 ARM 二进制；ARM 版本的
+运行验证需要在真实 ARM 机器上进行（或开发阶段在本地临时使用用户态
+模拟器）。
 
 ### 8.4 本地测试
 

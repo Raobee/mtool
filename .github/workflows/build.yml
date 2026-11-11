@@ -1,0 +1,97 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install static build toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            musl-tools \
+            gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf \
+            libc6-dev-arm64-cross \
+            libc6-dev-armhf-cross \
+            file
+
+      - name: Build static binaries
+        run: sh scripts/build-static.sh all
+
+      - name: Test native x86_64 binary
+        run: sh tests/test_mtool.sh dist/mtool.x86_64
+
+      - name: Verify ARM ELF headers
+        run: |
+          file dist/mtool.aarch64 dist/mtool.armv7
+          readelf -h dist/mtool.aarch64 | grep -E 'Class:|Machine:|Type:'
+          readelf -h dist/mtool.armv7 | grep -E 'Class:|Machine:|Type:'
+
+      - name: Upload static binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: mtool-static
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download static binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: mtool-static
+          path: dist
+
+      - name: Package release
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          tar czf "mtool-${TAG}-linux-static.tar.gz" dist README.md LICENSE
+          cat > release-notes.md <<'EOF'
+          Static Linux binaries for mtool.
+
+          - `dist/mtool.x86_64`: x86_64, musl static (no glibc dependency)
+          - `dist/mtool.aarch64`: ARM64, static
+          - `dist/mtool.armv7`: ARM32 hard-float, static
+          - `r.*` LEN is a byte count; reads round to whole access units
+          - numbers are hexadecimal by default; use `--decimal` for base 10
+
+          Checksums are in `dist/*.sha256`.
+          EOF
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          ASSET="mtool-${TAG}-linux-static.tar.gz"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET" dist/mtool.* --clobber
+            gh release edit "$TAG" --title "mtool $TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" "$ASSET" dist/mtool.* \
+              --verify-tag \
+              --title "mtool $TAG" \
+              --notes-file release-notes.md
+          fi
