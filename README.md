@@ -397,6 +397,8 @@ sh scripts/build-static.sh all
 - `runs-on: ubuntu-22.04`，只 `apt-get install` 编译工具
   （`musl-tools`、`gcc-aarch64-linux-gnu`、`gcc-arm-linux-gnueabihf`、
   `libc6-dev-*-cross`），不装 qemu/虚拟机；
+- apt 安装设置 `DEBIAN_FRONTEND=noninteractive`，优先只刷新 Ubuntu
+  主源并带超时；runner 镜像里的第三方源卡住时不会无限等待；
 - push `main`、PR 或手动触发：编译三个架构，x86_64 跑文件测试，
   aarch64/armv7 做 `file` + `readelf -h` 校验，上传 `mtool-static`
   artifact；

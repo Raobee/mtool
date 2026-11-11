@@ -52,7 +52,7 @@
 #define PATH_MAX 4096
 #endif
 
-#define MTOOL_VERSION "1.0.1"
+#define MTOOL_VERSION "1.0.2"
 #define SYS_PCI_DEVICES "/sys/bus/pci/devices"
 #define MAX_BARS 6
 #define MAX_WRITE_VALUES 256

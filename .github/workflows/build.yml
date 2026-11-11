@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  DEBIAN_FRONTEND: noninteractive
+
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -18,15 +21,20 @@ jobs:
 
       - name: Install static build toolchains
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            musl-tools \
-            gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabihf \
-            libc6-dev-arm64-cross \
-            libc6-dev-armhf-cross \
-            file
+          set -euo pipefail
+          APT_OPTS="-o Acquire::ForceIPv4=true -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=2"
+          PKGS="build-essential musl-tools gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libc6-dev-arm64-cross libc6-dev-armhf-cross file"
+
+          # GitHub runner images contain several third-party apt sources.
+          # Refresh only the Ubuntu main source first; the fallback below
+          # refreshes everything with a hard timeout if a package is missing.
+          sudo DEBIAN_FRONTEND=noninteractive timeout 240 apt-get $APT_OPTS -o Dir::Etc::sourceparts=- update || true
+
+          if ! sudo DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y --no-install-recommends $PKGS; then
+            echo "install with the Ubuntu-only lists failed; refreshing all sources with a timeout" >&2
+            sudo DEBIAN_FRONTEND=noninteractive timeout 240 apt-get $APT_OPTS update || true
+            sudo DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y --no-install-recommends $PKGS
+          fi
 
       - name: Build static binaries
         run: sh scripts/build-static.sh all
