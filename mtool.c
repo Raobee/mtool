@@ -150,8 +150,6 @@ struct bar_info {
 struct options {
     enum op op;
     int width;
-    int count_set;
-    uint64_t count;
 
     char file[PATH_MAX];
     int use_bar;
@@ -189,6 +187,9 @@ static const char *progname = "mtool";
  */
 static int g_qword_atomic = 0;
 
+/* Original mtool style: bare numbers are hexadecimal.  --decimal opts out. */
+static int g_hex_default = 1;
+
 static void msg(const char *fmt, ...)
 {
     va_list ap;
@@ -224,6 +225,13 @@ static void on_sigbus(int sig)
     _exit(1);
 }
 
+static int number_base(const char *s)
+{
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+        return 16;
+    return g_hex_default ? 16 : 10;
+}
+
 static int parse_u64(const char *s, uint64_t *out)
 {
     char *end;
@@ -232,7 +240,7 @@ static int parse_u64(const char *s, uint64_t *out)
     if (s == NULL || *s == '\0' || *s == '-')
         return -1;
     errno = 0;
-    v = strtoull(s, &end, 0);
+    v = strtoull(s, &end, number_base(s));
     if (errno != 0 || end == s || *end != '\0')
         return -1;
     *out = (uint64_t)v;
@@ -247,7 +255,7 @@ static int parse_int(const char *s, int *out)
     if (s == NULL || *s == '\0')
         return -1;
     errno = 0;
-    v = strtol(s, &end, 0);
+    v = strtol(s, &end, number_base(s));
     if (errno != 0 || end == s || *end != '\0' || v < 0 || v > INT_MAX)
         return -1;
     *out = (int)v;
@@ -845,7 +853,7 @@ static void die_mmap(uint64_t addr, int err)
         fprintf(stderr,
                 "  /dev/mem is restricted by the kernel (CONFIG_STRICT_DEVMEM).\n"
                 "  PCI BAR MMIO is normally still allowed.  For a BAR use:\n"
-                "    %s r.l --bar <BDF>:<BAR> <offset> <count>\n",
+                "    %s r.l --bar <BDF>:<BAR> <offset> <len>\n",
                 progname);
     }
     exit(1);
@@ -947,22 +955,27 @@ static void usage(FILE *fp)
             "mtool %s - portable MMIO / PCI BAR peek & poke\n"
             "\n"
             "Usage:\n"
-            "  mtool r.{b|w|l|q} ADDR [COUNT] [options]\n"
+            "  mtool r.{b|w|l|q} ADDR [LEN] [options]\n"
             "  mtool w.{b|w|l|q} ADDR VALUE [VALUE ...] [options]\n"
             "  mtool pci [BDF] [--enable]\n"
             "  mtool bar BDF [INDEX] [--enable]\n"
             "  mtool help | version\n"
             "\n"
             "  b=8-bit  w=16-bit  l=32-bit  q=64-bit\n"
-            "  ADDR accepts 0x... and decimal.  COUNT is the number of elements.\n"
+            "  LEN is a byte count, not an element count.  A read rounds the\n"
+            "  start down and the end up to whole access units, e.g.\n"
+            "  r.l 0x0 0x1 and r.l 0x0 0x4 both return one 32-bit word.\n"
+            "  Numbers are hexadecimal by default (0x prefix optional); use\n"
+            "  --decimal for base 10.  So \"r.l 0x404040000 100\" reads 0x100\n"
+            "  bytes (256 bytes).\n"
             "\n"
             "Examples:\n"
-            "  mtool r.l 0x404040000 100\n"
+            "  mtool r.l 0x404040000 100   # 0x100 bytes, 64 words\n"
             "  mtool w.l 0x404040088 0xb600\n"
             "  mtool pci\n"
             "  mtool pci 01:00.0\n"
             "  mtool r.l --bar 01:00.0:0 0 0x100\n"
-            "  mtool r.l --file /tmp/dump.bin 0 64\n"
+            "  mtool r.l --file /tmp/dump.bin 0 0x40\n"
             "\n"
             "Options:\n"
             "  --file PATH       access a regular file instead of /dev/mem\n"
@@ -973,6 +986,8 @@ static void usage(FILE *fp)
             "  --no-enable       do not auto-enable with --bar\n"
             "  --read-only       open the backing read-only\n"
             "  --no-ascii        omit the ASCII column\n"
+            "  --hex             parse bare numbers as hexadecimal (default)\n"
+            "  --decimal         parse bare numbers as decimal\n"
             "  --qword-atomic    do a single 64-bit MMIO access for q.*\n"
             "                    (default: two 32-bit accesses, safer on\n"
             "                     32-bit BARs / AXI-Lite)\n"
@@ -1060,6 +1075,10 @@ static int parse_options(int argc, char **argv, struct options *o,
             o->read_only = 1;
         } else if (strcmp(a, "--no-ascii") == 0) {
             o->no_ascii = 1;
+        } else if (strcmp(a, "--hex") == 0) {
+            g_hex_default = 1;
+        } else if (strcmp(a, "--decimal") == 0) {
+            g_hex_default = 0;
         } else if (strcmp(a, "--qword-atomic") == 0) {
             o->qword_atomic = 1;
         } else if (strcmp(a, "-v") == 0 || strcmp(a, "--verbose") == 0) {
@@ -1094,8 +1113,9 @@ int main(int argc, char **argv)
     enum op op;
     int width;
     uint64_t addr;
+    uint64_t read_len_raw = 0;
     uint8_t *buf = NULL;
-    size_t len;
+    size_t len = 0;
     void *map = MAP_FAILED;
     volatile uint8_t *ptr;
     uint64_t page_mask, map_off, delta;
@@ -1108,6 +1128,7 @@ int main(int argc, char **argv)
     memset(&o, 0, sizeof(o));
     o.width = 4;
     g_qword_atomic = 0;
+    g_hex_default = 1;
 
     if (argc < 2) {
         usage(stderr);
@@ -1201,7 +1222,7 @@ int main(int argc, char **argv)
 
     if (op == OP_READ) {
         if (npos < 1 || npos > 2)
-            die("read usage: mtool r.%c ADDR [COUNT]", cmd[2]);
+            die("read usage: mtool r.%c ADDR [LEN]", cmd[2]);
     } else {
         if (npos < 2)
             die("write usage: mtool w.%c ADDR VALUE [VALUE ...]", cmd[2]);
@@ -1212,17 +1233,13 @@ int main(int argc, char **argv)
 
     if (op == OP_READ) {
         if (npos == 2) {
-            if (parse_u64(pos[1], &o.count) != 0)
-                die("bad count '%s'", pos[1]);
-            o.count_set = 1;
+            if (parse_u64(pos[1], &read_len_raw) != 0)
+                die("bad length '%s'", pos[1]);
         } else {
-            o.count = 1;
+            read_len_raw = (uint64_t)width;
         }
-        if (o.count == 0)
-            die("count must be > 0");
-        if (o.count > (uint64_t)(SIZE_MAX / (size_t)width))
-            die("count too large");
-        len = (size_t)o.count * (size_t)width;
+        if (read_len_raw == 0)
+            die("length must be > 0");
     } else {
         uint64_t values[MAX_WRITE_VALUES];
         int nvalues = npos - 1;
@@ -1255,6 +1272,27 @@ int main(int argc, char **argv)
     }
 
     open_target(&o, &addr, &t);
+
+    if (op == OP_READ) {
+        uint64_t req_addr = addr;
+        uint64_t wmask = (uint64_t)width - 1;
+        uint64_t start, end, end_aligned, nbytes;
+
+        if (req_addr > UINT64_MAX - read_len_raw)
+            die("address + length overflow");
+        end = req_addr + read_len_raw;
+        if (end > UINT64_MAX - wmask)
+            die("address + length overflow");
+        start = req_addr & ~wmask;
+        end_aligned = (end + wmask) & ~wmask;
+        if (end_aligned < start)
+            die("address overflow");
+        nbytes = end_aligned - start;
+        if (nbytes > (uint64_t)SIZE_MAX)
+            die("length too large");
+        len = (size_t)nbytes;
+        addr = start;
+    }
 
     if (t.has_limit) {
         if (addr > t.limit || (uint64_t)len > t.limit - addr)

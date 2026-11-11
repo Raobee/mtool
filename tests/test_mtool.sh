@@ -24,6 +24,15 @@ check_contains() {
     esac
 }
 
+check_not_contains() {
+    haystack=$1
+    needle=$2
+    label=$3
+    case "$haystack" in
+        *"$needle"*) fail "$label: did not expect '$needle' in: $haystack" ;;
+    esac
+}
+
 # 32-bit write / read
 "$MTOOL" w.l --file "$F" 0x10 0x11223344
 out=$("$MTOOL" r.l --file "$F" 0x10 1)
@@ -46,13 +55,24 @@ check_contains "$out" "5a" "r.b"
 
 # Multiple values, little-endian layout
 "$MTOOL" w.l --file "$F" 0x50 0x01020304 0x05060708
-out=$("$MTOOL" r.l --file "$F" 0x50 2)
+out=$("$MTOOL" r.l --file "$F" 0x50 0x8)
 check_contains "$out" "01020304 05060708" "multiple values"
 
-# Unaligned file access is allowed
-"$MTOOL" w.l --file "$F" 0x61 0xdeadbeef
-out=$("$MTOOL" r.l --file "$F" 0x61 1)
-check_contains "$out" "deadbeef" "unaligned"
+# Reading from inside a word returns the whole word, based at its boundary.
+"$MTOOL" w.l --file "$F" 0x60 0xdeadbeef
+out=$("$MTOOL" r.l --file "$F" 0x61 0x1)
+check_contains "$out" "0000000000000060: deadbeef" "start rounding"
+
+# LEN is a byte count, and .l rounds up to whole 32-bit words.
+"$MTOOL" w.l --file "$F" 0x90 0x11111111 0x22222222
+out=$("$MTOOL" r.l --file "$F" 0x90 0x1)
+check_contains "$out" "11111111" "len=1 returns one word"
+check_not_contains "$out" "22222222" "len=1 overread"
+out=$("$MTOOL" r.l --file "$F" 0x90 0x4)
+check_contains "$out" "11111111" "len=4 returns one word"
+check_not_contains "$out" "22222222" "len=4 overread"
+out=$("$MTOOL" r.l --file "$F" 0x90 0x5)
+check_contains "$out" "11111111 22222222" "len=5 spans two words"
 
 # ASCII column and --no-ascii
 out=$("$MTOOL" r.b --file "$F" 0x40 1)
@@ -78,8 +98,8 @@ if "$MTOOL" w.l --file "$F" 0x10 1 --read-only >/dev/null 2>&1; then
     fail "--read-only write succeeded"
 fi
 
-# Address parsing: decimal and hex
-"$MTOOL" w.l --file "$F" 128 0xa5a5a5a5
+# Numbers are hex by default; --decimal opts out.
+"$MTOOL" w.l --file "$F" 128 0xa5a5a5a5 --decimal
 out=$("$MTOOL" r.l --file "$F" 0x80 1)
 check_contains "$out" "a5a5a5a5" "decimal address"
 

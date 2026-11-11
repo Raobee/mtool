@@ -89,7 +89,7 @@ sh scripts/build-static.sh all
 ## 3. 命令语法
 
 ```text
-mtool r.{b|w|l|q} ADDR [COUNT] [options]
+mtool r.{b|w|l|q} ADDR [LEN] [options]
 mtool w.{b|w|l|q} ADDR VALUE [VALUE ...] [options]
 mtool pci [BDF] [--enable]
 mtool bar BDF [INDEX] [--enable]
@@ -103,8 +103,13 @@ mtool help | version
 | `r.l` / `w.l` | 32-bit | 4 个字（照片里的格式） |
 | `r.q` / `w.q` | 64-bit | 2 个字 |
 
-- `ADDR` 支持 `0x...` 和十进制。
-- 读命令的 `COUNT` 是“元素个数”，不是字节数：`r.l ... 100` 读 400 字节。
+- 数字默认按**十六进制**解析，`0x` 前缀可省；需要十进制时加 `--decimal`。
+- 读命令的 `LEN` 是**字节数**，不是元素个数。读取时会把起始地址向下、
+  结束地址向上对齐到整个访问宽度：
+  - `r.l 0x0 0x1` 和 `r.l 0x0 0x4` 都返回一个 32-bit 字；
+  - `r.l 0x0 0x5` 返回两个 32-bit 字；
+  - 从 `0x12` 读 1 字节，返回的是包含它的 `0x10` 那个字。
+- 省略 `LEN` 时默认读一个访问宽度（`r.l` 4 字节、`r.q` 8 字节……）。
 - 写命令默认静默，和照片一致；加 `-v` 才打印写入确认。
 - 读命令输出 16 字节一行、右侧带 ASCII 列；`--no-ascii` 可关闭。
 - `q.*` 默认拆成两个 32-bit MMIO 访问（对 32-bit BAR / AXI-Lite 更稳）；
@@ -113,7 +118,8 @@ mtool help | version
 常用例子：
 
 ```sh
-# 照片里的两条
+# 照片里的两条。注意 100 是十六进制 = 0x100 = 256 字节（64 个 DW），
+# 这与照片里 0x000~0x0f0 共 16 行（每行 16 字节）一致。
 ./mtool r.l 0x404040000 100
 ./mtool w.l 0x404040088 0xb600
 
@@ -134,7 +140,10 @@ mtool help | version
 
 # 测试文件后端，不需要 root
 ./mtool w.l --file /tmp/mem.bin 0x10 0x11223344
-./mtool r.l --file /tmp/mem.bin 0x10 1
+./mtool r.l --file /tmp/mem.bin 0x10 1     # 1 字节，向上取整为一个 DW
+
+# 用十进制地址/长度
+./mtool r.l --file /tmp/mem.bin 16 4 --decimal
 ```
 
 输出示例：
@@ -441,7 +450,7 @@ CI 中默认关闭 `pci` 枚举测试，因为最小容器的 `/sys` 可能不�
 | 照片 | 本工具 |
 |---|---|
 | `mtool w.1 0x40404001c 0x1` | 应为 `mtool w.l 0x40404001c 0x1`（`l` 是 32-bit） |
-| `mtool r.l 0x404040000 100` | `./mtool r.l 0x404040000 100` |
+| `mtool r.l 0x404040000 100` | `./mtool r.l 0x404040000 100`（100 是十六进制 = 256 字节） |
 | `mtool w.l 0x404040088 0xb600` | `./mtool w.l 0x404040088 0xb600` |
 | 写命令无输出 | 默认静默，`-v` 才输出 |
 | 16 字节一行、右侧 ASCII | 相同；`--no-ascii` 可关闭 |
