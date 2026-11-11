@@ -378,13 +378,13 @@ sh scripts/build-static.sh all
   避免 Docker 内直接走国外 apt 源；
 - 安装 `musl-tools`、`gcc-aarch64-linux-gnu`、`gcc-arm-linux-gnueabihf`、
   对应的 `libc6-dev-*-cross`；
-- `parallel:matrix` 三个 `ARCH`：`x86_64`、`aarch64`、`armv7`；
-- 每个 job：
-  1. `sh scripts/build-static.sh "$ARCH"`；
-  2. x86_64 直接跑文件测试；
-  3. aarch64/armv7 用 `file` + `readelf -h` 校验 ELF 架构，
-     静态链接检查已由构建脚本完成；
-  4. 上传 `dist/` artifact，保留一周。
+- `build` job 一次编译三个架构（`scripts/build-static.sh all`），
+  x86_64 直接跑文件测试，aarch64/armv7 用 `file` + `readelf -h`
+  校验 ELF 架构，静态链接检查由构建脚本完成；
+- 运行 `build` 并上传 `dist/` artifact，保留一周；
+- 推送 `v*` tag 时额外运行 `release` job：把 `dist/`、README、LICENSE
+  打成 `mtool-<tag>-linux-static.tar.gz`，用 `CI_JOB_TOKEN` 创建
+  GitLab Release，并把 tar 包作为 release asset 链接。
 
 CI 只负责编译和静态链接校验，不执行 ARM 二进制；ARM 版本的运行验证
 需要在真实 ARM 机器上进行（或开发阶段在本地临时使用用户态模拟器）。
