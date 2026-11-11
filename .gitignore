@@ -1,0 +1,14 @@
+# Build outputs
+/mtool
+/mtool.static
+/dist/
+*.o
+*.d
+*.log
+*.sha256
+
+# Editor / OS noise
+*~
+.DS_Store
+.idea/
+.vscode/
